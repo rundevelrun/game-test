@@ -1,0 +1,8 @@
+{
+  "name": "dot-dodge",
+  "version": "1.0.0",
+  "description": "Minimal dot avoidance survival game",
+  "scripts": {
+    "start": "npx serve . -p 3000"
+  }
+}

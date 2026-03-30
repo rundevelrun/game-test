@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Games</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #050510;
+      color: #ffffff;
+      font-family: Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      width: 100%;
+      max-width: 480px;
+      padding: 48px 24px 24px;
+      text-align: center;
+    }
+
+    header h1 {
+      font-size: 13px;
+      letter-spacing: 8px;
+      color: #334466;
+      text-transform: uppercase;
+    }
+
+    .stars {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .games {
+      width: 100%;
+      max-width: 480px;
+      padding: 16px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .game-card {
+      display: block;
+      background: #0a0a1a;
+      border: 1px solid #1a2a3a;
+      border-radius: 12px;
+      padding: 24px 20px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .game-card:active {
+      background: #0f1a2a;
+      border-color: #00cfff44;
+    }
+
+    .game-card .badge {
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: #00cfff;
+      margin-bottom: 8px;
+    }
+
+    .game-card h2 {
+      font-size: 22px;
+      font-weight: bold;
+      color: #ffffff;
+      margin-bottom: 6px;
+    }
+
+    .game-card p {
+      font-size: 12px;
+      color: #445566;
+      line-height: 1.6;
+    }
+
+    .game-card .arrow {
+      position: absolute;
+      right: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 18px;
+      color: #223344;
+    }
+
+    .coming-soon {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+
+    .coming-soon .badge {
+      color: #445566;
+    }
+  </style>
+</head>
+<body>
+  <canvas class="stars" id="stars"></canvas>
+
+  <header>
+    <h1>Games</h1>
+  </header>
+
+  <div class="games">
+    <a href="./dot-dodge/" class="game-card">
+      <div class="badge">STAGE SURVIVAL</div>
+      <h2>Dot Dodge</h2>
+      <p>15초를 버텨라. 스테이지마다 강해지는 적을 피하고 업그레이드하며 생존하라.</p>
+      <span class="arrow">›</span>
+    </a>
+
+    <!-- 추후 게임 추가 예정 -->
+  </div>
+
+  <script>
+    const canvas = document.getElementById('stars');
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const stars = Array.from({ length: 80 }, () => ({
+      x: Math.random(),
+      y: Math.random(),
+      r: Math.random() * 1.2 + 0.3,
+      a: Math.random() * 0.5 + 0.1,
+      speed: Math.random() * 0.008 + 0.003,
+      phase: Math.random() * Math.PI * 2
+    }));
+
+    let t = 0;
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      stars.forEach(s => {
+        const alpha = s.a * (0.5 + 0.5 * Math.sin(t * s.speed * 60 + s.phase));
+        ctx.beginPath();
+        ctx.arc(s.x * canvas.width, s.y * canvas.height, s.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+        ctx.fill();
+      });
+      t++;
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>
