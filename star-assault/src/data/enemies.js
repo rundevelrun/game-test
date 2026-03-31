@@ -49,8 +49,9 @@ function getEnemyType(stage) {
 }
 
 // 적 기본 HP
+// 초반(1~10): 빠르게 처치 가능, 중반(10~30): 영웅 고용하며 자연스럽게 버팀, 후반(30+): DPS 없으면 막힘
 function getEnemyHp(stage) {
-  return Math.floor(10 * Math.pow(1.5, stage - 1));
+  return Math.floor(10 * Math.pow(1.4, stage - 1)); // 1.5 → 1.4로 완화
 }
 
 // 미니보스 HP
@@ -63,7 +64,7 @@ function getBossHp(stage) {
   return getEnemyHp(stage) * 50;
 }
 
-// 골드 획득량
+// 골드 획득량 (초반 보상 증가로 빠른 영웅 고용 유도)
 function getGoldReward(stage) {
-  return Math.floor(stage * 5 * Math.pow(1.1, stage - 1));
+  return Math.floor(stage * 8 * Math.pow(1.12, stage - 1)); // 5→8, 1.1→1.12
 }

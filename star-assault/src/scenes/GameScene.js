@@ -102,6 +102,9 @@ class GameScene extends Phaser.Scene {
     this._goldMultiplier = 1;
     this._tapMultiplier = 1;
     this._autoSpeedMultiplier = 1;
+
+    // 구매 모드 (1 / 10 / 'max')
+    this._buyMode = 1;
   }
 
   // ─────────────────────────────────────────
@@ -201,6 +204,14 @@ class GameScene extends Phaser.Scene {
       stroke: '#220000',
       strokeThickness: 3
     }).setOrigin(0.5, 0.5).setDepth(26).setVisible(false);
+
+    // 킬 카운터 텍스트 (스테이지 진행도)
+    this._killCounterText = this.add.text(W / 2, BY + BH * 0.12, '0 / 10', {
+      fontSize: Math.floor(W * 0.038) + 'px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      alpha: 0.5
+    }).setOrigin(0.5, 0.5).setDepth(25).setAlpha(0.5);
 
     // 적 이름/타입 텍스트
     this._enemyNameText = this.add.text(W / 2, BY + BH * 0.88, '', {
@@ -387,26 +398,33 @@ class GameScene extends Phaser.Scene {
     g.lineTo(W, HY);
     g.strokePath();
 
-    // 헤더
+    // 헤더 행 높이
+    const headerH = Math.floor(HH * 0.13);
+
+    // 헤더 텍스트 (좌측)
     this.add.text(10, HY + 4, 'HEROES', {
       fontSize: Math.floor(HH * 0.07) + 'px',
       fontFamily: 'Arial Black, Arial',
       color: '#00cfff'
     }).setDepth(11);
 
-    // 총 DPS 표시
-    this._heroDpsText = this.add.text(W - 10, HY + 4, 'DPS: 0', {
-      fontSize: Math.floor(HH * 0.065) + 'px',
+    // 총 DPS 표시 (헤더 두 번째 줄)
+    this._heroDpsText = this.add.text(10, HY + Math.floor(HH * 0.075), 'DPS: 0', {
+      fontSize: Math.floor(HH * 0.055) + 'px',
       fontFamily: 'Arial',
       color: '#88aaff'
-    }).setOrigin(1, 0).setDepth(11);
+    }).setOrigin(0, 0).setDepth(11);
+
+    // 구매 모드 버튼 (x1 / x10 / Max) — 헤더 우측
+    this._buildBuyModeButtons(HY, headerH);
 
     // 영웅 목록 (스크롤 가능)
-    this._heroListY = HY + Math.floor(HH * 0.13);
+    // buyMode 버튼 공간 확보를 위해 헤더 영역을 headerH로 고정
+    this._heroListY = HY + headerH;
     this._heroRowH = Math.floor(HH * 0.2);
     this._heroScrollY = 0;
     this._heroMaxScrollY = 0;
-    this._heroListH = HH - Math.floor(HH * 0.13);
+    this._heroListH = HH - headerH;
 
     // 마스크 (클리핑 영역)
     this._heroMaskGraphic = this.add.graphics().setDepth(9);
@@ -453,6 +471,118 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  // ─────────────────────────────────────────
+  //  구매 모드 버튼 (x1 / x10 / Max)
+  // ─────────────────────────────────────────
+  _buildBuyModeButtons(HY, headerH) {
+    const W = this.W;
+    const modes = [1, 10, 'max'];
+    const labels = ['x1', 'x10', 'Max'];
+    const btnW = Math.floor(W * 0.13);
+    const btnH = Math.floor(headerH * 0.55);
+    const startX = W - (btnW * 3 + 8 * 2) - 6; // 우측 정렬
+
+    this._buyModeBtns = {};
+
+    modes.forEach((mode, i) => {
+      const bx = startX + i * (btnW + 8) + btnW / 2;
+      const by = HY + headerH / 2;
+
+      const isActive = this._buyMode === mode;
+      const bgColor = isActive ? 0x1155cc : 0x222233;
+      const strokeColor = isActive ? 0x44aaff : 0x444466;
+
+      const btn = this.add.rectangle(bx, by, btnW, btnH, bgColor, 1)
+        .setDepth(12).setInteractive({ useHandCursor: true });
+      btn.setStrokeStyle(1, strokeColor, 1);
+
+      const txt = this.add.text(bx, by, labels[i], {
+        fontSize: Math.floor(btnH * 0.55) + 'px',
+        fontFamily: 'Arial Black, Arial',
+        color: isActive ? '#ffffff' : '#8899aa'
+      }).setOrigin(0.5, 0.5).setDepth(13);
+
+      btn.on('pointerdown', () => {
+        this._buyMode = mode;
+        this._refreshBuyModeButtons();
+        this._refreshHeroRows();
+      });
+      btn.on('pointerover', () => {
+        if (this._buyMode !== mode) btn.setFillStyle(0x334455, 1);
+      });
+      btn.on('pointerout', () => {
+        btn.setFillStyle(this._buyMode === mode ? 0x1155cc : 0x222233, 1);
+      });
+
+      this._buyModeBtns[String(mode)] = { btn, txt };
+    });
+  }
+
+  // 구매 모드 버튼 외관 갱신
+  _refreshBuyModeButtons() {
+    const modes = [1, 10, 'max'];
+    modes.forEach((mode) => {
+      const entry = this._buyModeBtns[String(mode)];
+      if (!entry) return;
+      const isActive = this._buyMode === mode;
+      entry.btn.setFillStyle(isActive ? 0x1155cc : 0x222233, 1);
+      entry.btn.setStrokeStyle(1, isActive ? 0x44aaff : 0x444466, 1);
+      entry.txt.setColor(isActive ? '#ffffff' : '#8899aa');
+    });
+  }
+
+  // ─────────────────────────────────────────
+  //  영웅 구매 비용 계산 (buyMode 반영)
+  // ─────────────────────────────────────────
+  _getHeroBuyCost(hero, level) {
+    const mode = this._buyMode;
+    if (mode === 1) {
+      return getHeroCost(hero, level);
+    } else if (mode === 10) {
+      let total = 0;
+      for (let i = 0; i < 10; i++) {
+        total += getHeroCost(hero, level + i);
+      }
+      return total;
+    } else {
+      // max: 현재 골드로 살 수 있는 최대 레벨까지 비용 합산
+      let total = 0;
+      let lv = level;
+      while (true) {
+        const c = getHeroCost(hero, lv);
+        if (total + c > this.gold) break;
+        total += c;
+        lv++;
+        if (lv - level >= 1000) break; // 안전 상한
+      }
+      return total > 0 ? total : getHeroCost(hero, level);
+    }
+  }
+
+  // buyMode에 따른 구매 레벨 수 반환
+  _getHeroBuyLevels(hero, level) {
+    const mode = this._buyMode;
+    if (mode === 1) {
+      return 1;
+    } else if (mode === 10) {
+      return 10;
+    } else {
+      // max: 현재 골드로 살 수 있는 최대 레벨 수
+      let total = 0;
+      let count = 0;
+      let lv = level;
+      while (true) {
+        const c = getHeroCost(hero, lv);
+        if (total + c > this.gold) break;
+        total += c;
+        lv++;
+        count++;
+        if (count >= 1000) break; // 안전 상한
+      }
+      return Math.max(1, count);
+    }
+  }
+
   _buildHeroRows() {
     // 기존 오브젝트 제거
     for (const row of this._heroRowObjects) {
@@ -470,9 +600,9 @@ class GameScene extends Phaser.Scene {
 
     HEROES_DATA.forEach((hero, i) => {
       const level = this.heroLevels[hero.id] || 0;
-      const cost = getHeroCost(hero, level);
+      const buyCost = this._getHeroBuyCost(hero, level);
       const dps = getHeroDps(hero, level);
-      const canAfford = this.gold >= cost;
+      const canAfford = this.gold >= buyCost;
       // baseY는 스크롤 전 원래 위치 (스크롤 오프셋은 _updateHeroScroll에서 적용)
       const baseRowY = this._heroListY + i * rowH + rowH / 2;
 
@@ -494,16 +624,16 @@ class GameScene extends Phaser.Scene {
         color: nameColor
       }).setOrigin(0, 0.5).setDepth(13).setMask(this._heroMask);
 
-      // 레벨/설명
+      // 레벨/DPS + 다음 마일스톤
       const levelText = this.add.text(22, baseRowY + rowH * 0.2,
-        level > 0 ? `Lv.${level}  DPS: ${formatNum(dps)}` : `미고용  ${hero.desc}`, {
+        this._getLevelInfoText(hero, level), {
         fontSize: Math.floor(rowH * 0.2) + 'px',
         fontFamily: 'Arial',
         color: level > 0 ? '#88aacc' : '#445566'
       }).setOrigin(0, 0.5).setDepth(13).setMask(this._heroMask);
 
       // 고용/레벨업 버튼
-      const btnLabel = level === 0 ? `고용 ${formatNum(cost)}` : `Lv.UP ${formatNum(cost)}`;
+      const btnLabel = this._getBtnLabel(hero, level, buyCost);
       const btnColor = canAfford ? (level === 0 ? 0x22aa44 : 0x1155aa) : 0x333344;
       const btnW2 = Math.floor(W * 0.32);
       const btnH2 = rowH * 0.62;
@@ -529,13 +659,15 @@ class GameScene extends Phaser.Scene {
         this._heroScrolling = false;
       });
       btn.on('pointerover', () => {
-        if (this.gold >= getHeroCost(hero, this.heroLevels[hero.id] || 0)) {
-          btn.setFillStyle(level === 0 ? 0x33cc55 : 0x2266cc, 1);
+        const lv = this.heroLevels[hero.id] || 0;
+        const c2 = this._getHeroBuyCost(hero, lv);
+        if (this.gold >= c2) {
+          btn.setFillStyle(lv === 0 ? 0x33cc55 : 0x2266cc, 1);
         }
       });
       btn.on('pointerout', () => {
         const lv = this.heroLevels[hero.id] || 0;
-        const c2 = getHeroCost(hero, lv);
+        const c2 = this._getHeroBuyCost(hero, lv);
         btn.setFillStyle(this.gold >= c2 ? (lv === 0 ? 0x22aa44 : 0x1155aa) : 0x333344, 1);
       });
 
@@ -544,6 +676,33 @@ class GameScene extends Phaser.Scene {
 
     this._heroMaxScrollY = Math.max(0, HEROES_DATA.length * rowH - this._heroListH);
     this._updateHeroScroll();
+  }
+
+  // 레벨 정보 텍스트 (다음 마일스톤 표시 포함)
+  _getLevelInfoText(hero, level) {
+    if (level === 0) return `미고용  ${hero.desc}`;
+    const dps = getHeroDps(hero, level);
+    const nextMs = getNextMilestoneLevel(level);
+    if (nextMs !== null) {
+      return `Lv.${level} → ${nextMs}★  DPS: ${formatNum(dps)}`;
+    }
+    return `Lv.${level} MAX★  DPS: ${formatNum(dps)}`;
+  }
+
+  // 버튼 라벨 (buyMode 반영)
+  _getBtnLabel(hero, level, buyCost) {
+    const mode = this._buyMode;
+    if (level === 0) {
+      return `고용 ${formatNum(buyCost)}`;
+    }
+    if (mode === 1) {
+      return `Lv.UP ${formatNum(buyCost)}`;
+    } else if (mode === 10) {
+      return `x10 ${formatNum(buyCost)}`;
+    } else {
+      const buyLevels = this._getHeroBuyLevels(hero, level);
+      return `Max(${buyLevels}) ${formatNum(buyCost)}`;
+    }
   }
 
   _updateHeroScroll() {
@@ -562,9 +721,8 @@ class GameScene extends Phaser.Scene {
   _refreshHeroRows() {
     this._heroRowObjects.forEach(({ hero, rowBg, indicator, nameText, levelText, btn, btnText }) => {
       const level = this.heroLevels[hero.id] || 0;
-      const cost = getHeroCost(hero, level);
-      const dps = getHeroDps(hero, level);
-      const canAfford = this.gold >= cost;
+      const buyCost = this._getHeroBuyCost(hero, level);
+      const canAfford = this.gold >= buyCost;
 
       const heroColor = parseInt(hero.color.replace('#', ''), 16);
       indicator.setFillStyle(heroColor, level > 0 ? 0.9 : 0.3);
@@ -573,10 +731,10 @@ class GameScene extends Phaser.Scene {
       rowBg.setStrokeStyle(1, level > 0 ? 0x1a3055 : 0x111122, 1);
 
       nameText.setColor(level > 0 ? hero.color : '#556677');
-      levelText.setText(level > 0 ? `Lv.${level}  DPS: ${formatNum(dps)}` : `미고용  ${hero.desc}`);
+      levelText.setText(this._getLevelInfoText(hero, level));
       levelText.setColor(level > 0 ? '#88aacc' : '#445566');
 
-      const btnLabel = level === 0 ? `고용 ${formatNum(cost)}` : `Lv.UP ${formatNum(cost)}`;
+      const btnLabel = this._getBtnLabel(hero, level, buyCost);
       btnText.setText(btnLabel);
       btnText.setColor(canAfford ? '#ffffff' : '#556677');
       btn.setFillStyle(canAfford ? (level === 0 ? 0x22aa44 : 0x1155aa) : 0x333344, 1);
@@ -594,13 +752,23 @@ class GameScene extends Phaser.Scene {
     const hero = HEROES_DATA.find(h => h.id === heroId);
     if (!hero) return;
     const level = this.heroLevels[heroId] || 0;
-    const cost = getHeroCost(hero, level);
-    if (this.gold < cost) return;
+    const buyCost = this._getHeroBuyCost(hero, level);
+    if (this.gold < buyCost) return;
 
-    this.gold -= cost;
-    this.heroLevels[heroId] = level + 1;
+    // buyMode에 따른 레벨 수 계산
+    let buyLevels = this._getHeroBuyLevels(hero, level);
 
-    this._showPopup(this.W / 2, this.BATTLE_Y + this.BATTLE_H * 0.5, `${hero.name} Lv.${level + 1}!`, hero.color, 22, false);
+    // x10 모드: 골드가 부족하면 구매 취소
+    if (this._buyMode === 10) {
+      const cost10 = this._getHeroBuyCost(hero, level);
+      if (this.gold < cost10) return;
+    }
+
+    this.gold -= buyCost;
+    this.heroLevels[heroId] = level + buyLevels;
+
+    const newLevel = this.heroLevels[heroId];
+    this._showPopup(this.W / 2, this.BATTLE_Y + this.BATTLE_H * 0.5, `${hero.name} Lv.${newLevel}!`, hero.color, 22, false);
     this._refreshHeroRows();
     this._updateTopBar();
   }
@@ -679,6 +847,14 @@ class GameScene extends Phaser.Scene {
 
     this._drawEnemy();
     this._updateEnemyName();
+    this._updateKillCounter();
+  }
+
+  // 킬 카운터 업데이트
+  _updateKillCounter() {
+    if (this._killCounterText) {
+      this._killCounterText.setText(`${this.stageKills} / ${this.KILLS_PER_STAGE}`);
+    }
   }
 
   // ─────────────────────────────────────────
@@ -882,6 +1058,9 @@ class GameScene extends Phaser.Scene {
       this.stage++;
       this._showPopup(this.W / 2, this.BATTLE_Y + this.BATTLE_H * 0.3, `Stage ${this.stage}!`, '#00ffcc', 28, true);
     }
+
+    // 킬 카운터 업데이트
+    this._updateKillCounter();
 
     this._isBossActive = false;
     this._bossTimerText.setVisible(false);
