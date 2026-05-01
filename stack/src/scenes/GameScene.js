@@ -5,26 +5,25 @@ class GameScene extends Phaser.Scene {
     this.W = 400; this.H = 700;
     this.BLOCK_H = 30;
     this.DX = 16; this.DY = 14;
-    this.BASE_Y = this.H - 115;
     this.INIT_WIDTH = 180;
 
-    this.SLOT = { W: 82, H: 52, GAP: 8, Y: this.H - 70 };
+    // Slots sit in the bottom 80px — gameplay tap zone excludes this area
+    this.SLOT = { W: 88, H: 54, GAP: 8, Y: this.H - 68 };
     this.SLOT.startX = (this.W - (3 * this.SLOT.W + 2 * this.SLOT.GAP)) / 2;
+    this.BASE_Y = this.SLOT.Y - 30; // stack base just above slot panel
 
     this.ITEM_DEFS = {
-      wide:    { name: 'WIDE',   abbr: 'WD', color: 0x4ecdc4 },
-      restore: { name: 'RESTORE',abbr: 'RS', color: 0xe17055 },
-      slow:    { name: 'SLOW',   abbr: 'SL', color: 0x45b7d1 },
-      zone:    { name: 'ZONE',   abbr: 'BZ', color: 0xffd32a },
-      shield:  { name: 'SHIELD', abbr: 'SH', color: 0xa29bfe },
-      magnet:  { name: 'MAGNET', abbr: 'MG', color: 0xff9f43 },
-      double:  { name: '2X',     abbr: '2X', color: 0xff6b9d },
-      ghost:   { name: 'GHOST',  abbr: 'GH', color: 0x00b894 },
+      wide:    { name: 'WIDE',  abbr: 'WD', color: 0x4ecdc4, desc: '너비 +35%' },
+      restore: { name: 'RESET', abbr: 'RS', color: 0xe17055, desc: '너비 초기화' },
+      slow:    { name: 'SLOW',  abbr: 'SL', color: 0x45b7d1, desc: '속도 50% · 8블록' },
+      x5:      { name: 'X5',    abbr: 'X5', color: 0xffd32a, desc: '다음 탭 5블록 한번에' },
     };
     this.ITEM_IDS = Object.keys(this.ITEM_DEFS);
 
     this.itemSlots = [null, null, null];
-    this.fx = { slowLeft: 0, bigZoneLeft: 0, shield: false, magnetLeft: 0, doubleLeft: 0, ghostLeft: 0 };
+    this.fx = { slowLeft: 0 };
+    this.x5Active = false;
+    this.x5Running = false;
 
     const iw = this.INIT_WIDTH;
     this.stack = [{ x: (this.W - iw) / 2, width: iw, level: 0, color: this.getColor(0) }];
@@ -50,46 +49,63 @@ class GameScene extends Phaser.Scene {
 
     this.gfx = this.add.graphics().setDepth(5);
 
+    // Score (large faint bg text)
     this.scoreTxt = this.add.text(this.W / 2, 85, '0', {
       fontSize: '120px', fontFamily: 'Arial Black, Arial', color: '#ffffff'
     }).setOrigin(0.5).setAlpha(0.07).setDepth(1);
 
+    // Feedback popup
     this.feedbackTxt = this.add.text(this.W / 2, this.H * 0.38, '', {
       fontSize: '20px', fontFamily: 'Arial Black, Arial', color: '#00ffff'
     }).setOrigin(0.5).setAlpha(0).setDepth(10);
 
+    // Active effect indicator (top-right)
     this.fxTxt = this.add.text(this.W - 14, 14, '', {
       fontSize: '10px', fontFamily: 'Arial', color: '#445566',
       letterSpacing: 1, align: 'right'
     }).setOrigin(1, 0).setDepth(10);
 
-    // Item notification
-    this.itemNotifTxt = this.add.text(this.W / 2, this.H - 115, '', {
-      fontSize: '12px', fontFamily: 'Arial', color: '#ffffff', letterSpacing: 2
+    // Item get notification (just above slots)
+    this.itemNotifTxt = this.add.text(this.W / 2, this.SLOT.Y - 18, '', {
+      fontSize: '11px', fontFamily: 'Arial', color: '#aaaaaa', letterSpacing: 2
     }).setOrigin(0.5).setAlpha(0).setDepth(10);
 
-    // Item slots
+    // Slot panel background (separates from gameplay)
+    const panelGfx = this.add.graphics().setDepth(9);
+    panelGfx.fillStyle(0x020508, 0.92);
+    panelGfx.fillRect(0, this.SLOT.Y - 28, this.W, this.H - (this.SLOT.Y - 28));
+    panelGfx.lineStyle(1, 0x1a2a3a, 1);
+    panelGfx.lineBetween(0, this.SLOT.Y - 28, this.W, this.SLOT.Y - 28);
+
+    // Milestone progress bar
+    this.barGfx = this.add.graphics().setDepth(10);
+
+    // Slot graphics + text
     this.slotGfx = this.add.graphics().setDepth(11);
     this.slotTexts = [];
     this.slotZones = [];
     this.initSlots();
 
-    this.input.on('pointerdown', this.onTap, this);
+    // Input — tap only in gameplay area (above slot panel)
+    this.input.on('pointerdown', (ptr) => {
+      if (ptr.y >= this.SLOT.Y - 28) return; // slot panel area — ignore
+      this.onTap();
+    });
     this.input.keyboard?.on('keydown-SPACE', this.onTap, this);
   }
 
-  // ── Slots ──────────────────────────────────────────────
+  // ── Slot UI ────────────────────────────────────────────
 
   initSlots() {
     const { W, H, GAP, Y, startX } = this.SLOT;
     for (let i = 0; i < 3; i++) {
       const sx = startX + i * (W + GAP);
       this.slotTexts.push({
-        abbr: this.add.text(sx + W / 2, Y + 15, '', {
-          fontSize: '14px', fontFamily: 'Arial Black, Arial', color: '#ffffff'
+        abbr: this.add.text(sx + W / 2, Y + 16, '', {
+          fontSize: '15px', fontFamily: 'Arial Black, Arial', color: '#ffffff'
         }).setOrigin(0.5).setDepth(12),
-        tap: this.add.text(sx + W / 2, Y + 35, '', {
-          fontSize: '10px', fontFamily: 'Arial', color: '#aaaaaa'
+        sub: this.add.text(sx + W / 2, Y + 36, '', {
+          fontSize: '10px', fontFamily: 'Arial', color: '#aaaaaa', letterSpacing: 1
         }).setOrigin(0.5).setDepth(12)
       });
       const zone = this.add.zone(sx + W / 2, Y + H / 2, W, H).setInteractive({ useHandCursor: true });
@@ -102,14 +118,17 @@ class GameScene extends Phaser.Scene {
   redrawSlots() {
     const { W, H, GAP, Y, startX } = this.SLOT;
     this.slotGfx.clear();
+    this.barGfx.clear();
 
-    // Milestone bar above slots
-    const next = (Math.floor(this.blockCount / 10) + 1) * 10;
-    this.slotGfx.fillStyle(0x1a2a3a, 0.7);
-    this.slotGfx.fillRoundedRect(startX, Y - 22, 3 * W + 2 * GAP, 16, 4);
-    const fill = ((this.blockCount % 10) / 10) * (3 * W + 2 * GAP);
-    this.slotGfx.fillStyle(0x00cfff, 0.4);
-    this.slotGfx.fillRoundedRect(startX, Y - 22, fill, 16, 4);
+    // Progress bar
+    const barW = 3 * W + 2 * GAP;
+    const progress = (this.blockCount % 10) / 10;
+    this.barGfx.fillStyle(0x0a1525, 1);
+    this.barGfx.fillRoundedRect(startX, Y - 22, barW, 10, 5);
+    if (progress > 0) {
+      this.barGfx.fillStyle(0x00cfff, 0.5);
+      this.barGfx.fillRoundedRect(startX, Y - 22, barW * progress, 10, 5);
+    }
 
     for (let i = 0; i < 3; i++) {
       const sx = startX + i * (W + GAP);
@@ -117,23 +136,25 @@ class GameScene extends Phaser.Scene {
       const txt = this.slotTexts[i];
       if (item) {
         const def = this.ITEM_DEFS[item.id];
-        this.slotGfx.fillStyle(def.color, 0.85);
+        this.slotGfx.fillStyle(def.color, 0.88);
         this.slotGfx.fillRoundedRect(sx, Y, W, H, 8);
-        this.slotGfx.fillStyle(0xffffff, 0.12);
+        this.slotGfx.fillStyle(0xffffff, 0.14);
         this.slotGfx.fillRoundedRect(sx, Y, W, 6, { tl: 8, tr: 8, bl: 0, br: 0 });
+        this.slotGfx.lineStyle(1, 0xffffff, 0.1);
+        this.slotGfx.strokeRoundedRect(sx, Y, W, H, 8);
         txt.abbr.setText(def.abbr).setColor('#ffffff');
-        txt.tap.setText('TAP').setColor('#ffffff99');
+        txt.sub.setText('TAP').setColor('#ffffff88');
       } else {
-        this.slotGfx.lineStyle(1, 0x1a2a3a, 1);
+        this.slotGfx.lineStyle(1, 0x1a2a3a, 0.9);
         this.slotGfx.strokeRoundedRect(sx, Y, W, H, 8);
         txt.abbr.setText('');
-        txt.tap.setText('');
+        txt.sub.setText('');
       }
     }
   }
 
   activateSlot(i) {
-    if (!this.itemSlots[i] || !this.gameActive) return;
+    if (!this.itemSlots[i] || !this.gameActive || this.x5Running) return;
     this.applyItem(this.itemSlots[i].id);
     this.itemSlots[i] = null;
     this.redrawSlots();
@@ -147,51 +168,44 @@ class GameScene extends Phaser.Scene {
         top.width = nw; top.x = (this.W - nw) / 2;
         this.movingBlock.width = nw;
         this.movingBlock.x = -(nw + 20); this.movingBlock.dir = 1;
-        this.showFeedback('WIDE BLOCK!', '#4ecdc4'); break;
+        this.showFeedback('WIDE!', '#4ecdc4'); break;
       }
       case 'restore':
         top.width = this.INIT_WIDTH; top.x = (this.W - this.INIT_WIDTH) / 2;
         this.movingBlock.width = this.INIT_WIDTH;
         this.movingBlock.x = -(this.INIT_WIDTH + 20); this.movingBlock.dir = 1;
         this.showFeedback('RESTORED!', '#e17055'); break;
-      case 'slow':   this.fx.slowLeft = 8; this.showFeedback('SLOW MOTION', '#45b7d1'); break;
-      case 'zone':   this.fx.bigZoneLeft = 5; this.showFeedback('BIG ZONE!', '#ffd32a'); break;
-      case 'shield': this.fx.shield = true; this.showFeedback('SHIELD ON!', '#a29bfe'); break;
-      case 'magnet': this.fx.magnetLeft = 3; this.showFeedback('MAGNET x3', '#ff9f43'); break;
-      case 'double': this.fx.doubleLeft = 5; this.showFeedback('DOUBLE!', '#ff6b9d'); break;
-      case 'ghost':  this.fx.ghostLeft = 5; this.showFeedback('GHOST ON!', '#00b894'); break;
+      case 'slow':
+        this.fx.slowLeft = 8; this.showFeedback('SLOW MOTION', '#45b7d1'); break;
+      case 'x5':
+        this.x5Active = true; this.showFeedback('NEXT TAP → x5!', '#ffd32a'); break;
     }
     this.updateFxDisplay();
   }
 
   collectItem() {
-    const id = this.ITEM_IDS[Math.floor(Math.random() * this.ITEM_IDS.length)];
+    const existing = this.itemSlots.filter(Boolean).map(s => s.id);
+    const pool = this.ITEM_IDS.filter(id => !existing.includes(id));
+    const src = pool.length > 0 ? pool : this.ITEM_IDS;
+    const id = src[Math.floor(Math.random() * src.length)];
     const empty = this.itemSlots.findIndex(s => s === null);
-    if (empty >= 0) {
-      this.itemSlots[empty] = { id };
-    } else {
-      this.itemSlots.shift();
-      this.itemSlots.push({ id });
-    }
+    if (empty >= 0) this.itemSlots[empty] = { id };
+    else { this.itemSlots.shift(); this.itemSlots.push({ id }); }
     this.redrawSlots();
     const def = this.ITEM_DEFS[id];
-    this.itemNotifTxt.setText('ITEM: ' + def.name).setAlpha(1);
+    this.itemNotifTxt.setText('ITEM: ' + def.name + ' — ' + def.desc).setAlpha(1);
     this.tweens.killTweensOf(this.itemNotifTxt);
-    this.tweens.add({ targets: this.itemNotifTxt, alpha: 0, duration: 1400, delay: 900 });
+    this.tweens.add({ targets: this.itemNotifTxt, alpha: 0, duration: 1400, delay: 1000 });
   }
 
   updateFxDisplay() {
     const p = [];
     if (this.fx.slowLeft > 0) p.push('SLOW ' + this.fx.slowLeft);
-    if (this.fx.bigZoneLeft > 0) p.push('ZONE ' + this.fx.bigZoneLeft);
-    if (this.fx.doubleLeft > 0) p.push('2X ' + this.fx.doubleLeft);
-    if (this.fx.ghostLeft > 0) p.push('GHOST ' + this.fx.ghostLeft);
-    if (this.fx.magnetLeft > 0) p.push('MAG ' + this.fx.magnetLeft);
-    if (this.fx.shield) p.push('SHIELD');
+    if (this.x5Active) p.push('X5 READY');
     this.fxTxt.setText(p.join('\n'));
   }
 
-  // ── Rendering helpers ──────────────────────────────────
+  // ── 3D Rendering ───────────────────────────────────────
 
   getColor(level) {
     const hue = (200 + level * 10) % 360;
@@ -222,34 +236,24 @@ class GameScene extends Phaser.Scene {
 
   draw3DBlock(x, y, w, color, alpha = 1) {
     const H = this.BLOCK_H - 3, DX = this.DX, DY = this.DY;
-
-    // Front face
     this.gfx.fillStyle(color, alpha);
     this.gfx.fillRect(x, y, w, H);
-
-    // Top face — lighter
     this.gfx.fillStyle(this.lighten(color, 80), alpha);
     this.gfx.fillPoints([
       { x, y }, { x: x+w, y },
       { x: x+w+DX, y: y-DY }, { x: x+DX, y: y-DY }
     ], true);
-
-    // Right side — darker
     this.gfx.fillStyle(this.darken(color, 90), alpha);
     this.gfx.fillPoints([
       { x: x+w, y }, { x: x+w+DX, y: y-DY },
       { x: x+w+DX, y: y-DY+H }, { x: x+w, y: y+H }
     ], true);
-
-    // Edge lines for crispness
-    this.gfx.lineStyle(1, 0x000000, 0.5 * alpha);
-    this.gfx.lineBetween(x+DX, y-DY, x+w+DX, y-DY);       // top-back
-    this.gfx.lineBetween(x+w+DX, y-DY, x+w+DX, y-DY+H);   // right-back
-    this.gfx.lineBetween(x+w+DX, y-DY+H, x+w, y+H);       // bottom-right
-    this.gfx.lineBetween(x, y, x+DX, y-DY);                // top-left ridge
-    this.gfx.lineBetween(x+w, y, x+w+DX, y-DY);            // top-right ridge
-
-    // Front face top highlight
+    this.gfx.lineStyle(1, 0x000000, 0.45 * alpha);
+    this.gfx.lineBetween(x+DX, y-DY, x+w+DX, y-DY);
+    this.gfx.lineBetween(x+w+DX, y-DY, x+w+DX, y-DY+H);
+    this.gfx.lineBetween(x+w+DX, y-DY+H, x+w, y+H);
+    this.gfx.lineBetween(x, y, x+DX, y-DY);
+    this.gfx.lineBetween(x+w, y, x+w+DX, y-DY);
     this.gfx.fillStyle(0xffffff, 0.13 * alpha);
     this.gfx.fillRect(x, y, w, 3);
   }
@@ -257,7 +261,13 @@ class GameScene extends Phaser.Scene {
   // ── Game logic ─────────────────────────────────────────
 
   onTap() {
-    if (!this.gameActive) return;
+    if (!this.gameActive || this.x5Running) return;
+    if (this.x5Active) {
+      this.x5Active = false;
+      this.updateFxDisplay();
+      this.doX5Combo();
+      return;
+    }
     this.placeBlock();
   }
 
@@ -269,13 +279,6 @@ class GameScene extends Phaser.Scene {
     const overlap = right - left;
 
     if (overlap <= 2) {
-      if (this.fx.shield) {
-        this.fx.shield = false;
-        this.updateFxDisplay();
-        this.showFeedback('SHIELD!', '#a29bfe');
-        this.movingBlock.dir = -this.movingBlock.dir;
-        return;
-      }
       this.gameActive = false;
       this.cutPieces.push({
         x: cur.x, y: this.blockScreenY(top.level + 1),
@@ -291,17 +294,11 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    const threshold = this.fx.bigZoneLeft > 0 ? 20 : 8;
-    const isPerfect = Math.abs(cur.x - top.x) < threshold;
-    const useMagnet = this.fx.magnetLeft > 0 && !isPerfect;
-    const snap = isPerfect || useMagnet;
-    const newX = snap ? top.x : left;
-    const newWidth = snap ? top.width : Math.round(overlap);
+    const isPerfect = Math.abs(cur.x - top.x) < 8;
+    const newX = isPerfect ? top.x : left;
+    const newWidth = isPerfect ? top.width : Math.round(overlap);
 
-    if (useMagnet) {
-      this.fx.magnetLeft--;
-      this.showFeedback('MAGNET!', '#ff9f43');
-    } else if (isPerfect) {
+    if (isPerfect) {
       this.perfectStreak++;
       this.showFeedback(this.perfectStreak >= 3 ? 'PERFECT x' + this.perfectStreak : 'PERFECT', '#00ffff');
       this.spawnParticles(newX + newWidth / 2, this.blockScreenY(top.level + 1), this.getColor(top.level + 1));
@@ -318,17 +315,18 @@ class GameScene extends Phaser.Scene {
       });
     }
 
-    const newLevel = top.level + 1;
-    this.stack.push({ x: newX, width: newWidth, level: newLevel, color: this.getColor(newLevel) });
+    this.addBlock(newX, newWidth);
+  }
 
-    this.score += this.fx.doubleLeft > 0 ? 2 : 1;
+  addBlock(x, width) {
+    const top = this.stack[this.stack.length - 1];
+    const newLevel = top.level + 1;
+    this.stack.push({ x, width, level: newLevel, color: this.getColor(newLevel) });
+    this.score++;
     this.blockCount++;
     this.scoreTxt.setText(this.score);
 
     if (this.fx.slowLeft > 0) this.fx.slowLeft--;
-    if (this.fx.bigZoneLeft > 0) this.fx.bigZoneLeft--;
-    if (this.fx.doubleLeft > 0) this.fx.doubleLeft--;
-    if (this.fx.ghostLeft > 0) this.fx.ghostLeft--;
     this.updateFxDisplay();
 
     const targetOffset = Math.max(0, newLevel - 8);
@@ -340,20 +338,65 @@ class GameScene extends Phaser.Scene {
     this.blockSpeed = this.fx.slowLeft > 0 ? base * 0.5 : base;
 
     const goRight = this.movingBlock.dir < 0;
-    this.movingBlock = { x: goRight ? -newWidth - 20 : this.W + 20, width: newWidth, dir: goRight ? 1 : -1 };
+    this.movingBlock = { x: goRight ? -width - 20 : this.W + 20, width, dir: goRight ? 1 : -1 };
 
-    // Background hue shift
     const bgHue = (220 + this.blockCount * 2) % 360;
     this.cameras.main.setBackgroundColor(
       Phaser.Display.Color.HSLToColor(bgHue / 360, 0.5, 0.04).color
     );
 
-    // Item every 10 blocks
     if (this.blockCount % 10 === 0) {
       this.time.delayedCall(300, () => this.collectItem());
     }
+    this.redrawSlots();
+  }
 
-    this.redrawSlots(); // update progress bar
+  doX5Combo() {
+    this.x5Running = true;
+    const top = this.stack[this.stack.length - 1];
+    let count = 0;
+
+    const doOne = () => {
+      if (count >= 5) {
+        this.x5Running = false;
+        this.cameras.main.flash(250, 255, 215, 0, true);
+        return;
+      }
+      const t = this.stack[this.stack.length - 1];
+      const newLevel = t.level + 1;
+      const newColor = this.getColor(newLevel);
+      const cy = this.blockScreenY(newLevel);
+      this.stack.push({ x: t.x, width: t.width, level: newLevel, color: newColor });
+      this.spawnParticles(t.x + t.width / 2, cy, newColor);
+      this.score++;
+      this.blockCount++;
+      this.scoreTxt.setText(this.score);
+
+      const targetOffset = Math.max(0, newLevel - 8);
+      if (targetOffset > this.cameraOffset) this.cameraOffset = targetOffset;
+
+      if (this.blockCount % 10 === 0) {
+        this.time.delayedCall(600 + count * 100, () => this.collectItem());
+      }
+
+      count++;
+      this.time.delayedCall(110, doOne);
+    };
+
+    this.showFeedback('X5 COMBO!', '#ffd32a');
+    doOne();
+
+    this.time.delayedCall(660, () => {
+      const t = this.stack[this.stack.length - 1];
+      const goRight = this.movingBlock.dir < 0;
+      this.movingBlock = { x: goRight ? -t.width - 20 : this.W + 20, width: t.width, dir: goRight ? 1 : -1 };
+      const bgHue = (220 + this.blockCount * 2) % 360;
+      this.cameras.main.setBackgroundColor(
+        Phaser.Display.Color.HSLToColor(bgHue / 360, 0.5, 0.04).color
+      );
+      this.redrawSlots();
+      this.updateFxDisplay();
+    });
   }
 
   spawnParticles(cx, cy, color) {
@@ -376,7 +419,7 @@ class GameScene extends Phaser.Scene {
     const dt = delta / 1000;
     this.pulseT += dt;
 
-    if (this.gameActive) {
+    if (this.gameActive && !this.x5Running) {
       this.movingBlock.x += this.blockSpeed * this.movingBlock.dir * dt;
       if (this.movingBlock.x > this.W + 20) this.movingBlock.dir = -1;
       if (this.movingBlock.x < -this.movingBlock.width - 20) this.movingBlock.dir = 1;
@@ -396,47 +439,40 @@ class GameScene extends Phaser.Scene {
 
     this.gfx.clear();
 
-    // Stack (3D)
     for (const block of this.stack) {
       const y = this.blockScreenY(block.level);
       if (y < -this.BLOCK_H - this.DY || y > this.H + 10) continue;
       this.draw3DBlock(block.x, y, block.width, block.color);
     }
 
-    if (this.gameActive && this.stack.length > 0) {
+    if (this.gameActive && this.stack.length > 0 && !this.x5Running) {
       const top = this.stack[this.stack.length - 1];
       const movY = this.blockScreenY(top.level + 1);
       const mb = this.movingBlock;
       const mbColor = this.getColor(top.level + 1);
 
-      // Ghost preview
-      if (this.fx.ghostLeft > 0) {
-        this.gfx.lineStyle(2, 0xffffff, 0.22);
-        this.gfx.strokeRect(top.x, movY, top.width, this.BLOCK_H - 3);
-      }
-
-      // Slow glow
       if (this.fx.slowLeft > 0) {
         const ga = 0.05 + 0.04 * Math.sin(this.pulseT * 5);
         this.gfx.fillStyle(mbColor, ga);
         this.gfx.fillRect(mb.x - 10, movY - 10, mb.width + 20, this.BLOCK_H + 14);
       }
 
-      // Guide outline
+      if (this.x5Active) {
+        const pa = 0.15 + 0.1 * Math.sin(this.pulseT * 6);
+        this.gfx.lineStyle(2, 0xffd32a, pa + 0.2);
+        this.gfx.strokeRect(mb.x - 4, movY - 4, mb.width + 8, this.BLOCK_H + 5);
+      }
+
       this.gfx.lineStyle(1, 0xffffff, 0.06);
       this.gfx.strokeRect(top.x, movY, top.width, this.BLOCK_H - 3);
-
-      // Moving block (3D)
       this.draw3DBlock(mb.x, movY, mb.width, mbColor);
     }
 
-    // Particles
     for (const p of this.particles) {
       this.gfx.fillStyle(p.color, Math.max(0, p.alpha));
       this.gfx.fillCircle(p.x, p.y, p.r);
     }
 
-    // Cut pieces (rotating)
     for (const cp of this.cutPieces) {
       if (cp.alpha <= 0) continue;
       const cx = cp.x + cp.width / 2, cy = cp.y + (this.BLOCK_H - 3) / 2;
@@ -446,14 +482,6 @@ class GameScene extends Phaser.Scene {
       this.gfx.fillStyle(cp.color, Math.max(0, cp.alpha));
       this.gfx.fillRect(-cp.width / 2, -(this.BLOCK_H - 3) / 2, cp.width, this.BLOCK_H - 3);
       this.gfx.restore();
-    }
-
-    // Shield pulse ring
-    if (this.fx.shield && this.stack.length > 0) {
-      const top = this.stack[this.stack.length - 1];
-      const ty = this.blockScreenY(top.level);
-      this.gfx.lineStyle(2, 0xa29bfe, 0.4 + 0.3 * Math.sin(this.pulseT * 4));
-      this.gfx.strokeRect(top.x - 5, ty - 5, top.width + 10 + this.DX, this.BLOCK_H + 10);
     }
   }
 }
