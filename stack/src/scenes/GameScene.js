@@ -7,10 +7,10 @@ class GameScene extends Phaser.Scene {
     this.DX = 16; this.DY = 14;
     this.INIT_WIDTH = 180;
 
-    // Slots sit in the bottom 80px — gameplay tap zone excludes this area
-    this.SLOT = { W: 88, H: 54, GAP: 8, Y: this.H - 68 };
+    // Slots at top — below score, above gameplay
+    this.SLOT = { W: 88, H: 50, GAP: 8, Y: 148 };
     this.SLOT.startX = (this.W - (3 * this.SLOT.W + 2 * this.SLOT.GAP)) / 2;
-    this.BASE_Y = this.SLOT.Y - 30; // stack base just above slot panel
+    this.BASE_Y = this.H - 100; // stack base at bottom
 
     this.ITEM_DEFS = {
       wide:    { name: 'WIDE',  abbr: 'WD', color: 0x4ecdc4, desc: '너비 +35%' },
@@ -66,16 +66,16 @@ class GameScene extends Phaser.Scene {
     }).setOrigin(1, 0).setDepth(10);
 
     // Item get notification (just above slots)
-    this.itemNotifTxt = this.add.text(this.W / 2, this.SLOT.Y - 18, '', {
+    this.itemNotifTxt = this.add.text(this.W / 2, this.SLOT.Y + this.SLOT.H + 22, '', {
       fontSize: '11px', fontFamily: 'Arial', color: '#aaaaaa', letterSpacing: 2
     }).setOrigin(0.5).setAlpha(0).setDepth(10);
 
-    // Slot panel background (separates from gameplay)
+    // Slot panel background — top strip only
     const panelGfx = this.add.graphics().setDepth(9);
     panelGfx.fillStyle(0x020508, 0.92);
-    panelGfx.fillRect(0, this.SLOT.Y - 28, this.W, this.H - (this.SLOT.Y - 28));
+    panelGfx.fillRect(0, this.SLOT.Y - 28, this.W, this.SLOT.H + 56);
     panelGfx.lineStyle(1, 0x1a2a3a, 1);
-    panelGfx.lineBetween(0, this.SLOT.Y - 28, this.W, this.SLOT.Y - 28);
+    panelGfx.lineBetween(0, this.SLOT.Y + this.SLOT.H + 8, this.W, this.SLOT.Y + this.SLOT.H + 8);
 
     // Milestone progress bar
     this.barGfx = this.add.graphics().setDepth(10);
@@ -86,9 +86,9 @@ class GameScene extends Phaser.Scene {
     this.slotZones = [];
     this.initSlots();
 
-    // Input — tap only in gameplay area (above slot panel)
+    // Input — tap only in gameplay area (below slot panel)
     this.input.on('pointerdown', (ptr) => {
-      if (ptr.y >= this.SLOT.Y - 28) return; // slot panel area — ignore
+      if (ptr.y <= this.SLOT.Y + this.SLOT.H + 8) return; // slot panel area — ignore
       this.onTap();
     });
     this.input.keyboard?.on('keydown-SPACE', this.onTap, this);
